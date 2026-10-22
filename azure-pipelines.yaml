@@ -1,0 +1,50 @@
+name: $(Build.Repository.Name)_$(Build.DefinitionName)_$(Build.SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- checkout: self
+  clean: true
+
+- task: NodeTool@0
+  inputs:
+    versionSpec: '24.x'
+  displayName: 'Install Node.js'
+
+- bash: |
+    set -euo pipefail
+    npm ci
+    npm run build
+    npm test
+    npm run test:compiled
+  workingDirectory: '$(Build.SourcesDirectory)'
+  displayName: 'Compile and test the application'
+
+- bash: |
+    set -euo pipefail
+    runtimeDirectory="$(Build.ArtifactStagingDirectory)/app"
+    mkdir -p "$runtimeDirectory"
+    cp package.json package-lock.json tsconfig.json "$runtimeDirectory/"
+    cp -R dist "$runtimeDirectory/dist"
+    cd "$runtimeDirectory"
+    npm ci --omit=dev
+    test -f dist/server.js
+  workingDirectory: '$(Build.SourcesDirectory)'
+  displayName: 'Prepare standalone production runtime'
+
+- task: ArchiveFiles@2
+  inputs:
+    rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/app'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/drop.zip'
+    replaceExistingArchive: true
+  displayName: 'Archive standalone application'
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)/drop.zip'
+    ArtifactName: 'drop'
+    publishLocation: 'Container'
+  displayName: 'Publish Artifact'
