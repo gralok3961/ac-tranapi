@@ -1,3 +1,4 @@
+import { AgentAccountRevocationContextInternalRequestDto, AgentAccountRevocationContextResponseDto, CompleteAgentAccountRevocationRequestDto, RevokeAgentAccountResponseDto } from "@models/dtos/agent-account";
 import { IPlatformAPIEndpointService } from "@hash-types/interfaces/platform-api-endpoint-service.interface";
 import { HttpService } from "@hashtrion/common/services/http-client.service";
 import { HashCrossProtocol } from "@hashtrion/application/hash-protocol";
@@ -12,6 +13,14 @@ export class PlatformAPIEndpointService implements IPlatformAPIEndpointService {
     constructor(
         @inject(HttpService) private httpService: HttpService
     ) { }
+
+    async getAgentAccountRevocationContext(dto: AgentAccountRevocationContextInternalRequestDto): Promise<AgentAccountRevocationContextResponseDto> {
+        return await this.httpService.post(`${this.controller}/agent-account/revocation-context/a`, dto, this.getInternalApiOptions());
+    }
+
+    async revokeAgentAccount(dto: CompleteAgentAccountRevocationRequestDto): Promise<RevokeAgentAccountResponseDto> {
+        return await this.httpService.post(`${this.controller}/agent-account/revoke/a`, dto, this.getInternalApiOptions());
+    }
 
     private getInternalApiOptions() {
 

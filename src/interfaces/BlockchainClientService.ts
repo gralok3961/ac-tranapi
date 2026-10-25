@@ -1,9 +1,12 @@
+import { AgentAccountRevocationContextResponseDto, RevokeAgentAccountRequestDto, RevokeAgentAccountResponseDto } from "@models/dtos/agent-account";
 import { BlockChainId, NetworkTypeAlias } from "@hashtrion/application/hash-protocol";
 import { AgentAccountActivationSubmitResult, DecodedAgentAccountActivationTransactionDto } from "@models/dtos/agent-account";
 import { PaymentTransactionVerificationResult, StandardizedSubmitResult } from "@models/dtos/payment";
 import { VerifyChallengeSignatureParams } from "blockchains/blockchain";
 
 export interface IBlockchainClientService {
+
+    revokeAgentSigningAuthority(request: RevokeAgentAccountRequestDto, context: AgentAccountRevocationContextResponseDto): Promise<RevokeAgentAccountResponseDto>;
 
     submitAndWait(payload: string, network: NetworkTypeAlias): Promise<StandardizedSubmitResult>;
 

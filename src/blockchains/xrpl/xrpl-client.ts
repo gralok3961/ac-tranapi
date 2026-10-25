@@ -1,9 +1,11 @@
+import { AgentAccountRevocationContextResponseDto, RevokeAgentAccountRequestDto, RevokeAgentAccountResponseDto } from "@models/dtos/agent-account";
+import { ErrorResponse } from "@hashtrion/common/error-response";
 import { PaymentTransactionVerificationResult, StandardizedSubmitResult } from "@models/dtos/payment";
 import { IBlockchainClient, XRPLNETWORK } from "@hash-types/interfaces/blockchain-client.interface";
 import { NativeToken, NetworkTypeAlias } from "@hashtrion/application/hash-protocol";
 import { normalizeXrplCurrency } from "blockchains/blockchain.utils";
 import { VerifyChallengeSignatureParams } from "../blockchain";
-import { Client, decode, hashes, Payment, dropsToXrp, isValidClassicAddress, SubmittableTransaction } from "xrpl";
+import { Client, decode, encode, verifySignature, hashes, Payment, dropsToXrp, isValidClassicAddress, SubmittableTransaction } from "xrpl";
 import * as rippleKeypairs from 'ripple-keypairs';
 import { injectable } from "inversify";
 import { PaymentStatusReult } from "blockchains/blockchain.enum";
@@ -270,6 +272,86 @@ export class XrplClient implements IBlockchainClient {
         }
 
         return isValidClassicAddress(cleanedAddress);
+    }
+
+    private validateRevocationTransaction(transaction: any, expectedAccount: string): string {
+        try {
+            if (transaction.TransactionType !== "SetRegularKey" || transaction.Account !== expectedAccount ||
+                Object.prototype.hasOwnProperty.call(transaction, "RegularKey") || transaction.Signers !== undefined ||
+                typeof transaction.SigningPubKey !== "string" ||
+                rippleKeypairs.deriveAddress(transaction.SigningPubKey) !== expectedAccount ||
+                !Number.isInteger(transaction.Sequence) || transaction.Sequence <= 0 ||
+                !Number.isInteger(transaction.LastLedgerSequence) || transaction.LastLedgerSequence <= 0) {
+                throw new Error("Invalid owner-signed RegularKey removal.");
+            }
+            const payload = encode(transaction);
+            if (!verifySignature(payload, transaction.SigningPubKey)) throw new Error("Invalid signature.");
+            return hashes.hashSignedTx(payload);
+        } catch {
+            throw new ErrorResponse("Invalid owner-signed RegularKey removal transaction.", 400);
+        }
+    }
+
+    public async revokeAgentSigningAuthority(request: RevokeAgentAccountRequestDto,
+        context: AgentAccountRevocationContextResponseDto): Promise<RevokeAgentAccountResponseDto> {
+        const hash = request.txHash.toUpperCase();
+        if (request.payload) {
+            let transaction: unknown;
+            try { transaction = decode(request.payload); } catch {
+                throw new ErrorResponse("Invalid revocation payload.", 400);
+            }
+            if (this.validateRevocationTransaction(transaction, context.publicAddress) !== hash)
+                throw new ErrorResponse("Revocation transaction hash mismatch.", 400);
+        }
+        await this.ensureConnected();
+        let result: any;
+        try {
+            result = (await this.client.request({ command: "tx", transaction: hash, binary: false })).result;
+        } catch (error: any) {
+            if (error?.data?.error !== "txnNotFound") throw error;
+            // Hash-only recovery never creates or submits a replacement transaction.
+            if (!request.payload || context.isRevoked)
+                throw new ErrorResponse("Revocation is not confirmed. Retry checking the same transaction.", 409);
+            const current = (await this.client.request({ command: "account_info", account: context.publicAddress,
+                ledger_index: "validated" })).result;
+            if (current?.validated !== true || current.account_data?.Account !== context.publicAddress ||
+                current.account_data.RegularKey !== context.delegatedAuthorityIdentifier) {
+                throw new ErrorResponse("The selected signing authority is not the current validated RegularKey.", 409);
+            }
+            result = (await this.client.submitAndWait(request.payload)).result;
+        }
+        if (result?.validated !== true || result.hash?.toUpperCase() !== hash ||
+            !Number.isInteger(result.ledger_index) || result.ledger_index <= 0 ||
+            typeof result.meta !== "object" || !result.meta?.TransactionResult) {
+            throw new ErrorResponse("Revocation outcome is not confirmed. Retry the same transaction.", 409);
+        }
+        const transaction = result.tx_json ?? Object.fromEntries(Object.entries(result).filter(([key]) =>
+            !["hash", "ledger_index", "ledger_hash", "inLedger", "date", "meta", "validated", "ctid", "status"].includes(key)));
+        if (this.validateRevocationTransaction(transaction, context.publicAddress) !== hash)
+            throw new ErrorResponse("Confirmed revocation transaction does not match the request.", 409);
+        if (result.meta.TransactionResult !== "tesSUCCESS")
+            throw new ErrorResponse(`XRPL revocation failed: ${result.meta.TransactionResult}`, 422);
+
+        // Bind the ledger proof to this authority, not a removal from an older registration.
+        const removed = result.meta.AffectedNodes?.some((node: any) => {
+            const account = node.ModifiedNode;
+            return account?.LedgerEntryType === "AccountRoot" &&
+                account.FinalFields?.Account === context.publicAddress &&
+                account.PreviousFields?.RegularKey === context.delegatedAuthorityIdentifier &&
+                !Object.prototype.hasOwnProperty.call(account.FinalFields, "RegularKey");
+        });
+        if (!removed) throw new ErrorResponse("Transaction did not remove the selected signing authority.", 409);
+
+        const accountResult = (await this.client.request({ command: "account_info", account: context.publicAddress,
+            ledger_index: context.isRevoked ? result.ledger_index : "validated" })).result;
+        const accountData = accountResult?.account_data;
+        if (accountResult?.validated !== true || !Number.isInteger(accountResult.ledger_index) ||
+            accountResult.ledger_index! < result.ledger_index || !accountData || accountData.Account !== context.publicAddress ||
+            Object.prototype.hasOwnProperty.call(accountData, "RegularKey")) {
+            throw new ErrorResponse("RegularKey removal could not be confirmed in the validated ledger.", 409);
+        }
+        return { agentAccountId: context.agentAccountId, signingAuthorityId: context.signingAuthorityId,
+            txHash: hash, ledgerIndex: result.ledger_index };
     }
 
     public async submitAgentAccountActivationAndWait(txBlob: string):

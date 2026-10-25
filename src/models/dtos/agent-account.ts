@@ -152,3 +152,41 @@ export interface SaveAgentSpendingPolicyInternalRequestDto {
     nonce: string;
     policy: SaveAgentSpendingPolicyDto;
 }
+
+export interface AgentAccountRevocationContextRequestDto extends GetAgentAccountAccessStateRequestDto {
+    delegatedAuthorityIdentifier: string;
+}
+export interface AgentAccountRevocationContextInternalRequestDto extends GetAgentAccountAccessStateInternalRequestDto {
+    delegatedAuthorityIdentifier: string;
+    agentAccountId?: string;
+    signingAuthorityId?: string;
+}
+export interface AgentAccountRevocationContextResponseDto {
+    agentAccountId: string;
+    signingAuthorityId: string;
+    appInstallationId: string;
+    chainId: number;
+    publicAddress: string;
+    delegatedAuthorityIdentifier: string;
+    signingAuthorityStatus: AgentSigningAuthorityStatus;
+    isRevoked: boolean;
+}
+export interface RevokeAgentAccountRequestDto {
+    agentAccountId: string;
+    signingAuthorityId: string;
+    chainId: number;
+    publicAddress: string;
+    delegatedAuthorityIdentifier: string;
+    payload?: string;
+    txHash: string;
+}
+export interface RevokeAgentAccountResponseDto {
+    agentAccountId: string;
+    signingAuthorityId: string;
+    txHash: string;
+    ledgerIndex: number;
+}
+export interface CompleteAgentAccountRevocationRequestDto extends AgentAccountRevocationContextInternalRequestDto {
+    txHash: string;
+    ledgerIndex: number;
+}

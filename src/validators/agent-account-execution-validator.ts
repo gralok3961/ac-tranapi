@@ -1,3 +1,4 @@
+import { RevokeAgentAccountRequestDto } from "@models/dtos/agent-account";
 import {
     ActivateAgentAccountRequestDto, AgentAccountChallengeDetailResponseDto,
     AgentAccountChallengeRequestDto, AgentAccountChallengeVerifyRequestDto,
@@ -12,6 +13,17 @@ import { isValidUuid } from "./common.validator";
 
 @injectable()
 export class AgentAccountExecutionValidator {
+
+    validateRevokeAgentAccountRequest(dto: RevokeAgentAccountRequestDto): RevokeAgentAccountRequestDto {
+        if (!dto || !isValidUuid(dto.agentAccountId) || !isValidUuid(dto.signingAuthorityId) ||
+            dto.chainId !== 1 || typeof dto.publicAddress !== "string" || !dto.publicAddress.trim() ||
+            typeof dto.delegatedAuthorityIdentifier !== "string" || !dto.delegatedAuthorityIdentifier.trim() ||
+            typeof dto.txHash !== "string" || !/^[A-Fa-f0-9]{64}$/.test(dto.txHash) ||
+            (dto.payload !== undefined && (typeof dto.payload !== "string" || !/^(?:[A-Fa-f0-9]{2})+$/.test(dto.payload)))) {
+            throw new ErrorResponse("Invalid Agent Account revocation request.", HttpStatus.BAD_REQUEST);
+        }
+        return { ...dto, txHash: dto.txHash.toUpperCase() };
+    }
 
     requiredPublicAddress(
         publicAddress: string | undefined | null

@@ -1,3 +1,4 @@
+import { AgentAccountRevocationContextResponseDto, RevokeAgentAccountRequestDto, RevokeAgentAccountResponseDto } from "@models/dtos/agent-account";
 import { VerifyChallengeSignatureParams } from "blockchains/blockchain";
 import { AgentAccountActivationSubmitResult, DecodedAgentAccountActivationTransactionDto } from "@models/dtos/agent-account";
 import { DecodedPayment, PaymentTransactionVerificationResult, StandardizedSubmitResult } from "@models/dtos/payment";
@@ -158,6 +159,14 @@ export class BlockchainClientService implements IBlockchainClientService {
         const client = this.getClient(network);
 
         return await client.verifyChallengeSignature(params);
+    }
+
+    public async revokeAgentSigningAuthority(request: RevokeAgentAccountRequestDto,
+        context: AgentAccountRevocationContextResponseDto): Promise<RevokeAgentAccountResponseDto> {
+        const network = this.getNetworkByCahinId(context.chainId);
+        const client = this.getClient(network);
+        if (!(client instanceof XrplClient)) throw new ErrorResponse("Unsupported blockchain client.", HttpStatus.BAD_REQUEST);
+        return await client.revokeAgentSigningAuthority(request, context);
     }
 
     public async verifyAgentSigningAuthority(chainId: number, publicAddress: string, delegatedAuthorityIdentifier: string

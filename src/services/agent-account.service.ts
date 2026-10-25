@@ -1,3 +1,4 @@
+import { AgentAccountRevocationContextRequestDto, AgentAccountRevocationContextResponseDto, RevokeAgentAccountRequestDto, RevokeAgentAccountResponseDto } from "@models/dtos/agent-account";
 import {
     ActivateAgentAccountRequestDto,
     ActivateAgentAccountResponseDto,
@@ -95,6 +96,59 @@ export class AgentAccountService {
 
         return provisionResult;
     }
+    async getAgentAccountRevocationContext(dto: AgentAccountRevocationContextRequestDto,
+        appInstallationId: string): Promise<AgentAccountRevocationContextResponseDto> {
+        const validated = this.agentAccountExecutionValidator.validateGetAgentAccountAccessStateRequest(dto);
+        this.agentAccountExecutionValidator.validateAgentAccountAccessStateTimestamp(validated.timestamp, 120);
+        if (validated.chainId !== BlockChainId.XRPL ||
+            !this.blockchainClientService.isValidAddress(validated.publicAddress, NetworkTypeAlias.XRPL) ||
+            !this.blockchainClientService.isValidAddress(dto.delegatedAuthorityIdentifier, NetworkTypeAlias.XRPL)) {
+            throw new ErrorResponse("Invalid Agent revocation account.", HttpStatus.BAD_REQUEST);
+        }
+        const verified = await this.blockchainClientService.verifyChallengeSignature({
+            address: validated.publicAddress, publicKey: validated.publicKey, signature: validated.signature,
+            challenge: `REVOKE_AGENT_CONTEXT|${validated.chainId}|${validated.publicAddress}|${dto.delegatedAuthorityIdentifier}|${validated.timestamp}`
+        }, NetworkTypeAlias.XRPL);
+        if (!verified) throw new ErrorResponse("Agent Account signature verification failed.", HttpStatus.BAD_REQUEST);
+        return await this.platformAPIService.getAgentAccountRevocationContext({
+            chainId: validated.chainId, publicAddress: validated.publicAddress,
+            delegatedAuthorityIdentifier: dto.delegatedAuthorityIdentifier, appInstallationId
+        });
+    }
+
+    async revokeAgentAccount(dto: RevokeAgentAccountRequestDto, appInstallationId: string): Promise<RevokeAgentAccountResponseDto> {
+        const request = this.agentAccountExecutionValidator.validateRevokeAgentAccountRequest(dto);
+        const context = await this.platformAPIService.getAgentAccountRevocationContext({
+            agentAccountId: request.agentAccountId, signingAuthorityId: request.signingAuthorityId,
+            chainId: request.chainId, publicAddress: request.publicAddress,
+            delegatedAuthorityIdentifier: request.delegatedAuthorityIdentifier, appInstallationId
+        });
+        if (context.agentAccountId.toLowerCase() !== request.agentAccountId.toLowerCase() ||
+            context.signingAuthorityId.toLowerCase() !== request.signingAuthorityId.toLowerCase() ||
+            context.appInstallationId.toLowerCase() !== appInstallationId.toLowerCase() ||
+            context.chainId !== request.chainId || context.publicAddress !== request.publicAddress ||
+            context.delegatedAuthorityIdentifier !== request.delegatedAuthorityIdentifier ||
+            (context.isRevoked ? context.signingAuthorityStatus !== AgentSigningAuthorityStatus.Revoked :
+                context.signingAuthorityStatus !== AgentSigningAuthorityStatus.Active)) {
+            throw new ErrorResponse("Agent revocation context does not match the request.", HttpStatus.FORBIDDEN);
+        }
+
+        const result = await this.blockchainClientService.revokeAgentSigningAuthority(request, context);
+        // The chain may already be final. A failed HTTP response is retried using this same hash and target.
+        const completed = await this.platformAPIService.revokeAgentAccount({
+            agentAccountId: context.agentAccountId, signingAuthorityId: context.signingAuthorityId,
+            appInstallationId, chainId: context.chainId, publicAddress: context.publicAddress,
+            delegatedAuthorityIdentifier: context.delegatedAuthorityIdentifier,
+            txHash: result.txHash, ledgerIndex: result.ledgerIndex
+        });
+        if (completed.agentAccountId.toLowerCase() !== context.agentAccountId.toLowerCase() ||
+            completed.signingAuthorityId.toLowerCase() !== context.signingAuthorityId.toLowerCase() ||
+            completed.txHash.toUpperCase() !== result.txHash || completed.ledgerIndex !== result.ledgerIndex) {
+            throw new ErrorResponse("Revocation synchronization could not be confirmed. Retry the same transaction.", HttpStatus.CONFLICT);
+        }
+        return completed;
+    }
+
     async activateAgentAccount(dto: ActivateAgentAccountRequestDto, appInstallationId: string):
         Promise<ActivateAgentAccountResponseDto> {
 

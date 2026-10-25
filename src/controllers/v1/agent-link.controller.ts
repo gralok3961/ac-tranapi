@@ -1,3 +1,4 @@
+import { AgentAccountRevocationContextRequestDto, RevokeAgentAccountRequestDto } from "@models/dtos/agent-account";
 import {
     ActivateAgentAccountRequestDto,
     ActivateAgentAccountResponseDto,
@@ -50,6 +51,18 @@ export class AgentAccountController {
             await this.agentAccountService.provisionAgentAccountAccess(req.body, appClient.appInstallationId);
 
         return res.json(result);
+    }
+
+    @httpPost('/revocation-context/a', appClientAuthMiddleware())
+    public async getAgentAccountRevocationContext(req: TypedRequest<AgentAccountRevocationContextRequestDto>, res: Response) {
+        const appClient = (req as typeof req & { appClient: AppClientAuthContext }).appClient;
+        return res.json(await this.agentAccountService.getAgentAccountRevocationContext(req.body, appClient.appInstallationId));
+    }
+
+    @httpPost('/revoke/a', appClientAuthMiddleware())
+    public async revokeAgentAccount(req: TypedRequest<RevokeAgentAccountRequestDto>, res: Response) {
+        const appClient = (req as typeof req & { appClient: AppClientAuthContext }).appClient;
+        return res.json(await this.agentAccountService.revokeAgentAccount(req.body, appClient.appInstallationId));
     }
 
     @httpPost('/activate/a', appClientAuthMiddleware())
